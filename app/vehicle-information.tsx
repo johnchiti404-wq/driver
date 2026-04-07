@@ -18,9 +18,10 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import brandsData from '../assets/brands.json';
 import colorsData from '../assets/colors.json';
-import { database, auth } from '@/config/firebase';
-import { ref, update } from 'firebase/database';
+import { auth, firestore } from '@/config/firebase';
+import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { useRegistration } from '@/context/RegistrationContext';
+import { uploadImageToCloudinary } from '@/utils/cloudinary';
 
 type ImageType = 'vehiclePicture' | 'vehicleLicense' | 'vehicleRegistration';
 type ViewMode = 'main' | 'instruction' | 'camera' | 'preview';
@@ -35,11 +36,12 @@ interface VehicleData {
   color: string;
   productionYear: string;
   numberPlate: string;
-  seats: number | null;
   classification: string;
   vehiclePicture: string;
   vehicleLicense: string;
   vehicleRegistration: string;
+  services?: string[];
+  tonnage?: string;
 }
 
 export default function VehicleInformation() {
@@ -58,18 +60,22 @@ export default function VehicleInformation() {
     color: '',
     productionYear: '',
     numberPlate: '',
-    seats: null,
     classification: '',
     vehiclePicture: '',
     vehicleLicense: '',
     vehicleRegistration: '',
+    services: [],
+    tonnage: '',
   });
+  
+  const [isUploading, setIsUploading] = useState(false);
 
   const [showBrandPicker, setShowBrandPicker] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showYearPicker, setShowYearPicker] = useState(false);
-  const [showSeatsPicker, setShowSeatsPicker] = useState(false);
+  const [showServicesPicker, setShowServicesPicker] = useState(false);
+  const [showTonnagePicker, setShowTonnagePicker] = useState(false);
   const [brandCategory, setBrandCategory] = useState<BrandItem['category'] | null>(null);
 
   const [brandSearch, setBrandSearch] = useState('');
@@ -259,7 +265,7 @@ export default function VehicleInformation() {
   }, [vehicleData.brand, brandCategory, modelSearch]);
 
   const handleBrandSelect = (item: BrandItem) => {
-    setVehicleData((prev) => ({ ...prev, brand: item.name, model: '', seats: null }));
+    setVehicleData((prev) => ({ ...prev, brand: item.name, model: '' }));
     setBrandCategory(item.category);
     setBrandSearch('');
     setShowBrandPicker(false);
@@ -281,27 +287,48 @@ export default function VehicleInformation() {
     setShowYearPicker(false);
   };
 
-  const handleSeatSelect = (seats: number) => {
-    const maxSeats = getMaxSeats();
-    if (maxSeats && seats > maxSeats) {
-      setVehicleData((prev) => ({ ...prev, seats: maxSeats }));
-    } else {
-      setVehicleData((prev) => ({ ...prev, seats }));
-    }
-    setShowSeatsPicker(false);
+  const handleServiceSelect = (service: string) => {
+    setVehicleData((prev) => {
+      const currentServices = prev.services || [];
+      if (currentServices.includes(service)) {
+        return { ...prev, services: currentServices.filter(s => s !== service) };
+      } else {
+        return { ...prev, services: [...currentServices, service] };
+      }
+    });
   };
 
-  const getMaxSeats = (): number | null => {
-    if (!vehicleData.brand || !brandCategory) return null;
+  const handleTonnageSelect = (tonnage: string) => {
+    setVehicleData((prev) => ({ ...prev, tonnage }));
+    setShowTonnagePicker(false);
+  };
 
-    if (brandCategory === 'Cars' && (brandsData.Cars as any)[vehicleData.brand]) {
-      return (brandsData.Cars as any)[vehicleData.brand].maxSeats;
-    } else if (brandCategory === 'CarDelivery' && (brandsData as any).CarDelivery[vehicleData.brand]) {
-      return (brandsData as any).CarDelivery[vehicleData.brand].maxSeats;
-    } else if (brandCategory === 'Minibuses' && (brandsData.Minibuses as any)[vehicleData.brand]) {
-      return (brandsData.Minibuses as any)[vehicleData.brand].maxSeats;
+  // Get available services based on vehicle category
+  const getAvailableServices = (): string[] => {
+    const category = registrationData.vehicleCategory;
+    if (category === 'car' || category === 'motorbike') {
+      return ['ride', 'delivery', 'courier', 'towing'];
     }
-    return null;
+    if (category === 'truck') {
+      return ['delivery', 'courier', 'moving'];
+    }
+    return [];
+  };
+
+  // Get available tonnage options for trucks
+  const getTonnageOptions = (): string[] => {
+    return ['1 ton', '2 tons', '3 tons', '4 tons', '5 tons', '8 tons', '10 tons'];
+  };
+
+  // Check if services should be shown (car, motorbike, truck)
+  const shouldShowServices = (): boolean => {
+    const category = registrationData.vehicleCategory;
+    return category === 'car' || category === 'motorbike' || category === 'truck';
+  };
+
+  // Check if tonnage should be shown (truck only)
+  const shouldShowTonnage = (): boolean => {
+    return registrationData.vehicleCategory === 'truck';
   };
 
   const validatePlate = (text: string) => {
@@ -330,24 +357,17 @@ export default function VehicleInformation() {
     setVehicleData((prev) => ({ ...prev, numberPlate: upper }));
   };
 
-  const classifyVehicle = (category: BrandItem['category'] | null, seats?: number | null) => {
-    if (category === 'Motorbikes' || category === 'SmallTrucks' || category === 'CarDelivery') {
-      return 'Delivery';
-    } else if (seats && seats <= 5) {
-      return 'Sedan';
-    } else if (seats && (seats === 6 || seats === 7)) {
-      return 'SUV';
-    } else if (seats && seats > 7) {
-      return 'Minibus/Van';
-    }
+  const classifyVehicle = (category: string | undefined) => {
+    if (category === 'motorbike') return 'Motorbike';
+    if (category === 'truck') return 'Truck';
+    if (category === 'minibus') return 'Minibus';
+    if (category === 'bicycle') return 'Bicycle';
+    if (category === 'car') return 'Car';
     return '';
   };
 
   const isFormValid = () => {
-    const shouldShowSeats = brandCategory === 'Cars' || brandCategory === 'Minibuses';
-    const seatsValid = !shouldShowSeats || vehicleData.seats !== null;
-
-    return (
+    const basicFieldsValid = 
       vehicleData.brand &&
       vehicleData.model &&
       vehicleData.color &&
@@ -356,9 +376,15 @@ export default function VehicleInformation() {
       vehicleData.numberPlate.length === 8 &&
       !plateError &&
       vehicleData.vehiclePicture &&
-      vehicleData.vehicleLicense &&
-      seatsValid
-    );
+      vehicleData.vehicleLicense;
+
+    // Check services requirement for car, motorbike, truck
+    const servicesValid = !shouldShowServices() || (vehicleData.services && vehicleData.services.length > 0);
+    
+    // Check tonnage requirement for truck
+    const tonnageValid = !shouldShowTonnage() || vehicleData.tonnage;
+
+    return basicFieldsValid && servicesValid && tonnageValid && !isUploading;
   };
 
   const handleNext = async () => {
@@ -373,30 +399,98 @@ export default function VehicleInformation() {
       return;
     }
 
-    const classification = classifyVehicle(brandCategory, vehicleData.seats);
+    const classification = classifyVehicle(registrationData.vehicleCategory);
 
     try {
-      const userRef = ref(database, `users/${uid}/vehicle`);
-      await update(userRef, {
-        brand: vehicleData.brand,
-        model: vehicleData.model,
-        color: vehicleData.color,
-        productionYear: vehicleData.productionYear,
-        plateNumber: vehicleData.numberPlate.trim(),
-        seats: vehicleData.seats || 0,
-        type: classification,
-        carImage: '',
-        vehicleLicense: '',
-        registrationCertificate: '',
-      });
+      setIsUploading(true);
 
-      console.log('Vehicle data saved to Firebase');
+      // Upload images to Cloudinary
+      let vehiclePictureUrl = '';
+      let vehicleLicenseUrl = '';
+      let vehicleRegistrationUrl = '';
+
+      if (vehicleData.vehiclePicture) {
+        // Convert image URI to base64 for upload
+        const response = await fetch(vehicleData.vehiclePicture);
+        const blob = await response.blob();
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64data = reader.result as string;
+            resolve(base64data.split(',')[1]);
+          };
+          reader.readAsDataURL(blob);
+        });
+        vehiclePictureUrl = await uploadImageToCloudinary(base64, 'driver_images');
+      }
+
+      if (vehicleData.vehicleLicense) {
+        const response = await fetch(vehicleData.vehicleLicense);
+        const blob = await response.blob();
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64data = reader.result as string;
+            resolve(base64data.split(',')[1]);
+          };
+          reader.readAsDataURL(blob);
+        });
+        vehicleLicenseUrl = await uploadImageToCloudinary(base64, 'driver_images');
+      }
+
+      if (vehicleData.vehicleRegistration) {
+        const response = await fetch(vehicleData.vehicleRegistration);
+        const blob = await response.blob();
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64data = reader.result as string;
+            resolve(base64data.split(',')[1]);
+          };
+          reader.readAsDataURL(blob);
+        });
+        vehicleRegistrationUrl = await uploadImageToCloudinary(base64, 'driver_images');
+      }
+
+      // Update Firestore with vehicle data and Cloudinary URLs
+      const driverRef = doc(firestore, 'drivers', uid);
+      const vehicleUpdateData: any = {
+        vehicle: {
+          brand: vehicleData.brand,
+          model: vehicleData.model,
+          color: vehicleData.color,
+          productionYear: vehicleData.productionYear,
+          plateNumber: vehicleData.numberPlate.trim(),
+          type: classification,
+          carImage: vehiclePictureUrl,
+          vehicleLicense: vehicleLicenseUrl,
+          registrationCertificate: vehicleRegistrationUrl,
+        },
+        registrationStep: 6,
+        updatedAt: serverTimestamp(),
+      };
+
+      // Add services if applicable
+      if (shouldShowServices() && vehicleData.services && vehicleData.services.length > 0) {
+        vehicleUpdateData.services = vehicleData.services;
+      }
+
+      // Add tonnage if applicable (truck only)
+      if (shouldShowTonnage() && vehicleData.tonnage) {
+        vehicleUpdateData.vehicle.tonnage = vehicleData.tonnage;
+      }
+
+      await updateDoc(driverRef, vehicleUpdateData);
+
+      console.log('Vehicle data saved to Firestore');
 
       // Navigate to the location selection page
       router.push('/chooseLocation');
     } catch (error) {
       console.error('Error saving vehicle data:', error);
       Alert.alert('Error', 'Failed to save vehicle information. Please try again.');
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -562,19 +656,6 @@ export default function VehicleInformation() {
           </Text>
         </TouchableOpacity>
 
-        {(brandCategory === 'Cars' || brandCategory === 'Minibuses') && (
-            <TouchableOpacity
-              style={styles.fieldBox}
-              onPress={() => vehicleData.model && setShowSeatsPicker(true)}
-              disabled={!vehicleData.model}
-            >
-              <Text style={styles.fieldLabel}>Seats</Text>
-              <Text style={vehicleData.seats ? styles.fieldValue : styles.fieldPlaceholder}>
-                {vehicleData.seats || ''}
-              </Text>
-            </TouchableOpacity>
-          )}
-
         <TouchableOpacity style={styles.fieldBox} onPress={() => setShowColorPicker(true)}>
           <Text style={styles.fieldLabel}>Vehicle color</Text>
           <Text style={vehicleData.color ? styles.fieldValue : styles.fieldPlaceholder}>
@@ -582,7 +663,11 @@ export default function VehicleInformation() {
           </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.fieldBox} onPress={() => setShowYearPicker(true)}>
+        <TouchableOpacity 
+          style={[styles.fieldBox, (!vehicleData.brand || !vehicleData.model) && styles.fieldBoxDisabled]} 
+          onPress={() => vehicleData.brand && vehicleData.model && setShowYearPicker(true)}
+          disabled={!vehicleData.brand || !vehicleData.model}
+        >
           <Text style={styles.fieldLabel}>Production year</Text>
           <Text style={vehicleData.productionYear ? styles.fieldValue : styles.fieldPlaceholder}>
             {vehicleData.productionYear || ''}
@@ -602,6 +687,41 @@ export default function VehicleInformation() {
           />
         </View>
         {plateError ? <Text style={styles.errorText}>{plateError}</Text> : null}
+
+        {/* Services field for car, motorbike, truck */}
+        {shouldShowServices() && (
+          <TouchableOpacity 
+            style={styles.fieldBox} 
+            onPress={() => setShowServicesPicker(true)}
+          >
+            <Text style={styles.fieldLabel}>Services</Text>
+            <Text style={vehicleData.services && vehicleData.services.length > 0 ? styles.fieldValue : styles.fieldPlaceholder}>
+              {vehicleData.services && vehicleData.services.length > 0 
+                ? vehicleData.services.join(', ') 
+                : 'Select services'}
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Tonnage field for truck only */}
+        {shouldShowTonnage() && (
+          <TouchableOpacity 
+            style={styles.fieldBox} 
+            onPress={() => setShowTonnagePicker(true)}
+          >
+            <Text style={styles.fieldLabel}>Tonnage</Text>
+            <Text style={vehicleData.tonnage ? styles.fieldValue : styles.fieldPlaceholder}>
+              {vehicleData.tonnage || 'Select tonnage'}
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Upload status indicator */}
+        {isUploading && (
+          <View style={styles.uploadingContainer}>
+            <Text style={styles.uploadingText}>Uploading images...</Text>
+          </View>
+        )}
       </ScrollView>
 
       <View style={styles.footer}>
@@ -730,32 +850,66 @@ export default function VehicleInformation() {
         </View>
       </Modal>
 
-      <Modal visible={showSeatsPicker} animationType="slide" transparent={false}>
+      {/* Services Picker Modal */}
+      <Modal visible={showServicesPicker} animationType="slide" transparent={false}>
         <View style={styles.modalContainer}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Number of seats</Text>
-            <TouchableOpacity onPress={() => setShowSeatsPicker(false)} style={styles.modalClose}>
+            <Text style={styles.modalTitle}>Select Services</Text>
+            <TouchableOpacity onPress={() => setShowServicesPicker(false)} style={styles.modalClose}>
+              <X color="#fff" size={28} />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.servicesInfo}>
+            <Text style={styles.servicesInfoText}>Select the services you want to offer</Text>
+          </View>
+          <FlatList
+            data={getAvailableServices()}
+            keyExtractor={(item) => item}
+            renderItem={({ item }) => {
+              const isSelected = vehicleData.services?.includes(item);
+              return (
+                <TouchableOpacity
+                  style={[styles.listItem, isSelected && styles.listItemSelected]}
+                  onPress={() => handleServiceSelect(item)}
+                >
+                  <Text style={styles.listItemText}>{item.charAt(0).toUpperCase() + item.slice(1)}</Text>
+                  {isSelected && <Text style={styles.checkMark}>✓</Text>}
+                </TouchableOpacity>
+              );
+            }}
+          />
+          <View style={styles.modalFooter}>
+            <TouchableOpacity 
+              style={styles.doneButton} 
+              onPress={() => setShowServicesPicker(false)}
+            >
+              <Text style={styles.doneButtonText}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Tonnage Picker Modal */}
+      <Modal visible={showTonnagePicker} animationType="slide" transparent={false}>
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Select Tonnage</Text>
+            <TouchableOpacity onPress={() => setShowTonnagePicker(false)} style={styles.modalClose}>
               <X color="#fff" size={28} />
             </TouchableOpacity>
           </View>
           <FlatList
-            data={Array.from({ length: 19 }, (_, i) => i + 2)}
-            keyExtractor={(item) => item.toString()}
-            renderItem={({ item }) => {
-              const maxSeats = getMaxSeats();
-              const disabled = maxSeats ? item > maxSeats : false;
-              return (
-                <TouchableOpacity
-                  style={[styles.listItem, disabled && styles.listItemDisabled]}
-                  onPress={() => handleSeatSelect(item)}
-                  disabled={disabled}
-                >
-                  <Text style={[styles.listItemText, disabled && styles.listItemTextDisabled]}>
-                    {item} seats
-                  </Text>
-                </TouchableOpacity>
-              );
-            }}
+            data={getTonnageOptions()}
+            keyExtractor={(item) => item}
+            renderItem={({ item }) => (
+              <TouchableOpacity 
+                style={[styles.listItem, vehicleData.tonnage === item && styles.listItemSelected]} 
+                onPress={() => handleTonnageSelect(item)}
+              >
+                <Text style={styles.listItemText}>{item}</Text>
+                {vehicleData.tonnage === item && <Text style={styles.checkMark}>✓</Text>}
+              </TouchableOpacity>
+            )}
           />
         </View>
       </Modal>
@@ -1126,5 +1280,52 @@ const styles = StyleSheet.create({
   colorItemText: {
     color: '#fff',
     fontSize: 16,
+  },
+  fieldBoxDisabled: {
+    opacity: 0.5,
+  },
+  servicesInfo: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#2a2a2a',
+  },
+  servicesInfoText: {
+    color: '#999',
+    fontSize: 14,
+  },
+  listItemSelected: {
+    backgroundColor: '#3a3a3a',
+    borderLeftWidth: 3,
+    borderLeftColor: '#B19CD9',
+  },
+  checkMark: {
+    color: '#B19CD9',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  modalFooter: {
+    padding: 16,
+    paddingBottom: 32,
+    borderTopWidth: 1,
+    borderTopColor: '#333',
+  },
+  doneButton: {
+    backgroundColor: '#B19CD9',
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  doneButtonText: {
+    color: '#000',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  uploadingContainer: {
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  uploadingText: {
+    color: '#B19CD9',
+    fontSize: 14,
   },
 });

@@ -14,8 +14,9 @@ import { X, ChevronLeft, ChevronRight, ArrowLeft } from 'lucide-react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { useRegistration } from '@/context/RegistrationContext';
-import { database, auth } from '@/config/firebase';
-import { ref, update } from 'firebase/database';
+import { auth, firestore } from '@/config/firebase';
+import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { uploadImageToCloudinary } from '@/utils/cloudinary';
 
 export default function IdStepPage() {
   const { registrationData, updateIdCard, setCurrentStep, totalSteps } = useRegistration();
@@ -23,6 +24,8 @@ export default function IdStepPage() {
   const [idFront, setIdFront] = useState<string | null>(null);
   const [idBack, setIdBack] = useState<string | null>(null);
   const [idNumber, setIdNumber] = useState(registrationData.idCard?.idNumber || '');
+  const [deliverWithBicycle, setDeliverWithBicycle] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
 
   const [showInstructions, setShowInstructions] = useState<'front' | 'back' | null>(null);
   const [showCamera, setShowCamera] = useState(false);
@@ -130,22 +133,62 @@ export default function IdStepPage() {
   };
 
   const handleNext = async () => {
-    if (!isFormValid) return;
+    if (!isFormValid || isUploading) return;
 
     const uid = auth.currentUser?.uid || registrationData.uid;
     if (!uid) return;
 
     try {
-      const userRef = ref(database, `users/${uid}/idCard`);
-      await update(userRef, {
-        idNumber: idNumber.trim(),
-        idFront: '',
-        idBack: '',
+      setIsUploading(true);
+
+      // Upload ID images to Cloudinary
+      let idFrontUrl = '';
+      let idBackUrl = '';
+
+      if (idFront) {
+        const response = await fetch(idFront);
+        const blob = await response.blob();
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64data = reader.result as string;
+            resolve(base64data.split(',')[1]);
+          };
+          reader.readAsDataURL(blob);
+        });
+        idFrontUrl = await uploadImageToCloudinary(base64, 'driver_images');
+      }
+
+      if (idBack) {
+        const response = await fetch(idBack);
+        const blob = await response.blob();
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64data = reader.result as string;
+            resolve(base64data.split(',')[1]);
+          };
+          reader.readAsDataURL(blob);
+        });
+        idBackUrl = await uploadImageToCloudinary(base64, 'driver_images');
+      }
+
+      // Update Firestore with ID data and Cloudinary URLs
+      const driverRef = doc(firestore, 'drivers', uid);
+      await updateDoc(driverRef, {
+        idCard: {
+          idNumber: idNumber.trim(),
+          idFrontImage: idFrontUrl,
+          idBackImage: idBackUrl,
+        },
+        deliverWithBicycle: deliverWithBicycle,
+        registrationStep: 3,
+        updatedAt: serverTimestamp(),
       });
 
       updateIdCard({
         idNumber: idNumber.trim(),
-        idImage: '',
+        idImage: idFrontUrl,
       });
 
       setCurrentStep(4);
@@ -153,6 +196,8 @@ export default function IdStepPage() {
     } catch (error) {
       console.error('Error saving ID data:', error);
       Alert.alert('Error', 'Failed to save ID information. Please try again.');
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -321,11 +366,29 @@ export default function IdStepPage() {
             placeholderTextColor="#666"
             keyboardType="numeric"
             maxLength={11}
-          />
-        </View>
-      </View>
+/>
+  </View>
 
-      <View style={styles.footer}>
+  {/* Deliver with bicycle checkbox */}
+  <TouchableOpacity 
+    style={styles.checkboxContainer} 
+    onPress={() => setDeliverWithBicycle(!deliverWithBicycle)}
+  >
+    <View style={[styles.checkbox, deliverWithBicycle && styles.checkboxChecked]}>
+      {deliverWithBicycle && <Text style={styles.checkboxMark}>✓</Text>}
+    </View>
+    <Text style={styles.checkboxLabel}>Deliver with my bicycle</Text>
+  </TouchableOpacity>
+
+  {/* Upload status indicator */}
+  {isUploading && (
+    <View style={styles.uploadingContainer}>
+      <Text style={styles.uploadingText}>Uploading images...</Text>
+    </View>
+  )}
+  </View>
+  
+  <View style={styles.footer}>
         <View style={styles.progressContainer}>
           <Text style={styles.progressText}>3 of {totalSteps}</Text>
           <View style={styles.progressBarBackground}>
@@ -644,9 +707,47 @@ const styles = StyleSheet.create({
     padding: 18,
     alignItems: 'center',
   },
-  uploadButtonText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#000',
+uploadButtonText: {
+  fontSize: 18,
+  fontWeight: '600',
+  color: '#000',
   },
-});
+  checkboxContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 20,
+    paddingVertical: 12,
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#666',
+    backgroundColor: '#3a3a3a',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  checkboxChecked: {
+    backgroundColor: '#B19CD9',
+    borderColor: '#B19CD9',
+  },
+  checkboxMark: {
+    color: '#000',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  checkboxLabel: {
+    color: '#fff',
+    fontSize: 16,
+  },
+  uploadingContainer: {
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  uploadingText: {
+    color: '#B19CD9',
+    fontSize: 14,
+  },
+  });

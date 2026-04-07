@@ -32,7 +32,7 @@ type OptionType = {
 const options: OptionType[] = [
   {
     id: 1,
-    label: 'Drive with my car',
+    label: 'Car',
     role: 'Rides',
     category: 'car',
     icon: '🚗',
@@ -44,7 +44,7 @@ const options: OptionType[] = [
   },
   {
     id: 2,
-    label: 'Drive with my bus',
+    label: 'Bus',
     role: 'Rides',
     category: 'minibus',
     icon: '🚌',
@@ -55,8 +55,8 @@ const options: OptionType[] = [
     tagColor: '#4169E1',
   },
   {
-    id: 4,
-    label: 'Deliver with motorbike',
+    id: 3,
+    label: 'Motorbike',
     role: 'Delivery',
     category: 'motorbike',
     icon: '🏍️',
@@ -67,8 +67,8 @@ const options: OptionType[] = [
     tagColor: '#228B22',
   },
   {
-    id: 5,
-    label: 'Deliver with my Bike',
+    id: 4,
+    label: 'Deliver with my bike',
     role: 'Delivery',
     category: 'bicycle',
     icon: '🚴',
@@ -79,8 +79,8 @@ const options: OptionType[] = [
     tagColor: '#FF8C00',
   },
   {
-    id: 6,
-    label: 'Delivery with small truck',
+    id: 5,
+    label: 'Truck',
     role: 'Delivery',
     category: 'truck',
     icon: '🚚',
