@@ -5,7 +5,7 @@ export async function uploadImageToCloudinary(
   try {
     const formData = new FormData();
     formData.append('file', `data:image/jpeg;base64,${base64Image}`);
-    formData.append('upload_preset', 'driver_registration');
+    formData.append('upload_preset', 'Aletwende_Driver');
     formData.append('folder', folder);
 
     const response = await fetch('https://api.cloudinary.com/v1_1/dexo5rpxb/image/upload', {
