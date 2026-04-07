@@ -173,14 +173,12 @@ export default function IdStepPage() {
         idBackUrl = await uploadImageToCloudinary(base64, 'driver_images');
       }
 
-      // Update Firestore with ID data and Cloudinary URLs
+      // Update Firestore with ID data and Cloudinary URLs using documents structure
       const driverRef = doc(firestore, 'drivers', uid);
       await updateDoc(driverRef, {
-        idCard: {
-          idNumber: idNumber.trim(),
-          idFrontImage: idFrontUrl,
-          idBackImage: idBackUrl,
-        },
+        'documents.idFront': idFrontUrl,
+        'documents.idBack': idBackUrl,
+        'documents.idNumber': idNumber.trim(),
         deliverWithBicycle: deliverWithBicycle,
         registrationStep: 3,
         updatedAt: serverTimestamp(),

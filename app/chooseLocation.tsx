@@ -11,8 +11,8 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Search } from 'lucide-react-native';
-import { database, auth } from '@/config/firebase';
-import { ref, update } from 'firebase/database';
+import { auth, firestore } from '@/config/firebase';
+import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { useRegistration } from '@/context/RegistrationContext';
 import RegistrationHeader from '@/components/RegistrationHeader';
 
@@ -61,13 +61,13 @@ export default function ChooseLocation() {
     }
 
     try {
-      await update(ref(database, `users/${uid}/operation`), {
-        available: false,
+      // Update Firestore driver document with location and finalize registration
+      const driverRef = doc(firestore, 'drivers', uid);
+      await updateDoc(driverRef, {
         place,
-      });
-
-      await update(ref(database, `users/${uid}`), {
-        status: 'pending',
+        verificationStatus: 'pending',
+        registrationStep: 7,
+        updatedAt: serverTimestamp(),
       });
 
       updateOperation({ place, available: false });

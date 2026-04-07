@@ -11,8 +11,8 @@ import { useState, useEffect, useRef } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { X } from 'lucide-react-native';
 import { useRegistration } from '@/context/RegistrationContext';
-import { auth } from '@/config/firebase';
-import { createDriverDocument, updateDriverData } from '@/utils/firebase';
+import { auth, firestore } from '@/config/firebase';
+import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 
 export default function OTPVerificationPage() {
   const { phone } = useLocalSearchParams<{ phone: string }>();
@@ -66,10 +66,12 @@ export default function OTPVerificationPage() {
       try {
         const uid = auth.currentUser?.uid || registrationData.uid;
         if (uid) {
-          const userRef = ref(database, `users/${uid}`);
-          await update(userRef, {
+          // Update Firestore driver document with phone number
+          const driverRef = doc(firestore, 'drivers', uid);
+          await updateDoc(driverRef, {
             phone: phone,
-            updatedAt: Date.now(),
+            registrationStep: 2,
+            updatedAt: serverTimestamp(),
           });
 
           updateRegistrationData({ phone: phone || '' });

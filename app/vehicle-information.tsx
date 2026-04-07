@@ -455,17 +455,17 @@ export default function VehicleInformation() {
       // Update Firestore with vehicle data and Cloudinary URLs
       const driverRef = doc(firestore, 'drivers', uid);
       const vehicleUpdateData: any = {
-        vehicle: {
-          brand: vehicleData.brand,
-          model: vehicleData.model,
-          color: vehicleData.color,
-          productionYear: vehicleData.productionYear,
-          plateNumber: vehicleData.numberPlate.trim(),
-          type: classification,
-          carImage: vehiclePictureUrl,
-          vehicleLicense: vehicleLicenseUrl,
-          registrationCertificate: vehicleRegistrationUrl,
-        },
+        'vehicle.brand': vehicleData.brand,
+        'vehicle.model': vehicleData.model,
+        'vehicle.color': vehicleData.color,
+        'vehicle.productionYear': vehicleData.productionYear,
+        'vehicle.plateNumber': vehicleData.numberPlate.trim(),
+        'vehicle.type': classification,
+        'vehicle.vehicleCategory': registrationData.vehicleCategory || '',
+        'vehicle.carImage': vehiclePictureUrl,
+        'vehicle.vehicleLicense': vehicleLicenseUrl,
+        'vehicle.registrationCertificate': vehicleRegistrationUrl,
+        'vehicle.seats': '',
         registrationStep: 6,
         updatedAt: serverTimestamp(),
       };
@@ -477,7 +477,7 @@ export default function VehicleInformation() {
 
       // Add tonnage if applicable (truck only)
       if (shouldShowTonnage() && vehicleData.tonnage) {
-        vehicleUpdateData.vehicle.tonnage = vehicleData.tonnage;
+        vehicleUpdateData['vehicle.tonnage'] = vehicleData.tonnage;
       }
 
       await updateDoc(driverRef, vehicleUpdateData);

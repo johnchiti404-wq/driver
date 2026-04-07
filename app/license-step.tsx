@@ -11,8 +11,9 @@ import { useState, useEffect } from 'react';
 import { router } from 'expo-router';
 import { X, ChevronLeft, ChevronRight } from 'lucide-react-native';
 import { useRegistration } from '@/context/RegistrationContext';
-import { database, auth } from '@/config/firebase';
-import { ref, update } from 'firebase/database';
+import { auth, firestore } from '@/config/firebase';
+import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { uploadImageToCloudinary } from '@/utils/cloudinary';
 
 export default function DriverLicensePage() {
   const { registrationData, updateLicense, setCurrentStep, totalSteps } = useRegistration();
@@ -29,6 +30,7 @@ export default function DriverLicensePage() {
   const [expiry, setExpiry] = useState(registrationData.license.expiry || '');
   const [licenseError, setLicenseError] = useState('');
   const [expiryError, setExpiryError] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
 
   // ✅ Keep local state in sync with global state
   useEffect(() => {
@@ -101,31 +103,74 @@ export default function DriverLicensePage() {
     return true;
   };
 
-  const isFormValid = licenseImage && selfieImage && isLicenseNumberValid(licenseNumber) && /^\d{2}\.\d{2}\.\d{4}$/.test(expiry) && !expiryError;
+  const isFormValid = licenseImage && selfieImage && isLicenseNumberValid(licenseNumber) && /^\d{2}\.\d{2}\.\d{4}$/.test(expiry) && !expiryError && !isUploading;
 
   const handleNext = async () => {
-    if (!isFormValid) return;
+    if (!isFormValid || isUploading) return;
 
     const uid = auth.currentUser?.uid || registrationData.uid;
     if (!uid) return;
 
     try {
-      const userRef = ref(database, `users/${uid}/license`);
-      await update(userRef, {
-        number: licenseNumber.trim(),
-        expiry: expiry.trim(),
+      setIsUploading(true);
+
+      // Upload license images to Cloudinary
+      let licenseImageUrl = '';
+      let selfieImageUrl = '';
+
+      if (licenseImage) {
+        const response = await fetch(licenseImage);
+        const blob = await response.blob();
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64data = reader.result as string;
+            resolve(base64data.split(',')[1]);
+          };
+          reader.readAsDataURL(blob);
+        });
+        licenseImageUrl = await uploadImageToCloudinary(base64, 'driver_images');
+      }
+
+      if (selfieImage) {
+        const response = await fetch(selfieImage);
+        const blob = await response.blob();
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64data = reader.result as string;
+            resolve(base64data.split(',')[1]);
+          };
+          reader.readAsDataURL(blob);
+        });
+        selfieImageUrl = await uploadImageToCloudinary(base64, 'driver_images');
+      }
+
+      // Update Firestore with license data
+      const driverRef = doc(firestore, 'drivers', uid);
+      await updateDoc(driverRef, {
+        'documents.licenseImage': licenseImageUrl,
+        'documents.selfieWithLicense': selfieImageUrl,
+        'documents.licenseNumber': licenseNumber.trim(),
+        'documents.licenseExpiry': expiry.trim(),
+        registrationStep: 4,
+        updatedAt: serverTimestamp(),
       });
 
       updateLicense({
         ...registrationData.license,
         number: licenseNumber.trim(),
         expiry: expiry.trim(),
+        licenseImage: licenseImageUrl,
+        selfieWithLicense: selfieImageUrl,
       });
 
       setCurrentStep(5);
       router.push('/ridesDelivery');
     } catch (error) {
       console.error('Error saving license data:', error);
+    } finally {
+      setIsUploading(false);
     }
   };
 

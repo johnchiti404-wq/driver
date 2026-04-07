@@ -17,8 +17,8 @@ import RegistrationFooter from '@/components/RegistrationFooter';
 import RegistrationHeader from '@/components/RegistrationHeader';
 import { Picker } from '@react-native-picker/picker';
 import { useRegistration } from '@/context/RegistrationContext';
-import { database, auth } from '@/config/firebase';
-import { ref, update } from 'firebase/database';
+import { auth, firestore } from '@/config/firebase';
+import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import {
   validateEmail,
   isAtLeast18YearsOld,
@@ -26,6 +26,7 @@ import {
   isValidPassword,
 } from '@/utils/validation';
 import { createFirebaseUser } from '@/utils/firebase';
+import { uploadImageToCloudinary } from '@/utils/cloudinary';
 
 export default function PersonalInfoPage() {
   const {
@@ -186,46 +187,94 @@ export default function PersonalInfoPage() {
         updateRegistrationData({ uid, email, password, confirmPassword });
       }
 
+      // Upload profile picture to Cloudinary
+      let profilePictureUrl = '';
+      if (photo) {
+        try {
+          const response = await fetch(photo);
+          const blob = await response.blob();
+          const base64 = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const base64data = reader.result as string;
+              resolve(base64data.split(',')[1]);
+            };
+            reader.readAsDataURL(blob);
+          });
+          profilePictureUrl = await uploadImageToCloudinary(base64, 'driver_images');
+        } catch (uploadError) {
+          console.error('Error uploading profile picture:', uploadError);
+        }
+      }
+
       updateProfile({
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         dob: dob,
-        profilePicture: '',
+        profilePicture: profilePictureUrl,
       });
 
-      const userRef = ref(database, `users/${uid}`);
-      await update(userRef, {
-        uid,
-        email: email.trim(),
-        profile: {
-          firstName: firstName.trim(),
-          lastName: lastName.trim(),
-          dob: dob,
-          profilePicture: '',
-        },
-        license: {
-          number: '',
-          expiry: '',
-          licenseImage: '',
-          selfieWithLicense: '',
-        },
-        idCard: { idNumber: '', idImage: '' },
-        vehicle: {
-          type: '',
-          brand: '',
-          model: '',
-          productionYear: '',
-          color: '',
-          plateNumber: '',
-          registrationCertificate: '',
-          carImage: '',
-          seats: 0,
-        },
-        operation: { place: '', available: false },
-        status: 'pending',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      });
+      // Check if driver document already exists to prevent duplicates
+      const driverRef = doc(firestore, 'drivers', uid);
+      const driverDoc = await getDoc(driverRef);
+
+      if (!driverDoc.exists()) {
+        // Create new driver document in Firestore with correct structure
+        await setDoc(driverRef, {
+          uid,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          email: email.trim(),
+          phone: '',
+          place: '',
+          role: 'driver',
+          verificationStatus: 'pending',
+          rating: 0,
+          reviewCount: 0,
+          profile: {
+            firstName: firstName.trim(),
+            lastName: lastName.trim(),
+            dob: dob,
+            profilePicture: profilePictureUrl,
+          },
+          documents: {
+            idFront: '',
+            idBack: '',
+            idNumber: '',
+            licenseImage: '',
+            licenseExpiry: '',
+            licenseNumber: '',
+            selfieWithLicense: '',
+          },
+          vehicle: {
+            brand: '',
+            model: '',
+            color: '',
+            plateNumber: '',
+            productionYear: '',
+            seats: '',
+            type: '',
+            vehicleCategory: '',
+            carImage: '',
+            registrationCertificate: '',
+            vehicleLicense: '',
+          },
+          registrationStep: 1,
+        });
+      } else {
+        // Update existing document
+        await setDoc(driverRef, {
+          updatedAt: serverTimestamp(),
+          email: email.trim(),
+          profile: {
+            firstName: firstName.trim(),
+            lastName: lastName.trim(),
+            dob: dob,
+            profilePicture: profilePictureUrl,
+          },
+          registrationStep: 1,
+        }, { merge: true });
+      }
 
       setCurrentStep(2);
       router.push('/step2');

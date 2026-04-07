@@ -46,53 +46,46 @@ export async function updateDriverData(
     }
 
     if (data.profile) {
-      updateData.profile = {
-        firstName: data.profile.firstName || '',
-        lastName: data.profile.lastName || '',
-        dob: data.profile.dob || '',
-        profilePicture: data.profile.profilePicture || '',
-      };
+      // Use dot notation for nested updates to avoid overwriting
+      if (data.profile.firstName) updateData['profile.firstName'] = data.profile.firstName;
+      if (data.profile.lastName) updateData['profile.lastName'] = data.profile.lastName;
+      if (data.profile.dob) updateData['profile.dob'] = data.profile.dob;
+      if (data.profile.profilePicture) updateData['profile.profilePicture'] = data.profile.profilePicture;
     }
 
     if (data.license) {
-      updateData.license = {
-        number: data.license.number || '',
-        expiry: data.license.expiry || '',
-        licenseImage: data.license.licenseImage || '',
-        selfieWithLicense: data.license.selfieWithLicense || '',
-      };
+      // Update documents section for license info
+      if (data.license.number) updateData['documents.licenseNumber'] = data.license.number;
+      if (data.license.expiry) updateData['documents.licenseExpiry'] = data.license.expiry;
+      if (data.license.licenseImage) updateData['documents.licenseImage'] = data.license.licenseImage;
+      if (data.license.selfieWithLicense) updateData['documents.selfieWithLicense'] = data.license.selfieWithLicense;
     }
 
     if (data.idCard) {
-      updateData.idCard = {
-        idNumber: data.idCard.idNumber || '',
-        idImage: data.idCard.idImage || '',
-      };
+      // Update documents section for ID info
+      if (data.idCard.idNumber) updateData['documents.idNumber'] = data.idCard.idNumber;
+      if (data.idCard.idImage) updateData['documents.idFront'] = data.idCard.idImage;
     }
 
     if (data.vehicleCategory) {
-      updateData.vehicleCategory = data.vehicleCategory;
+      updateData['vehicle.vehicleCategory'] = data.vehicleCategory;
     }
 
     if (data.vehicle) {
-      updateData.vehicle = {
-        type: data.vehicle.type || '',
-        brand: data.vehicle.brand || '',
-        model: data.vehicle.model || '',
-        productionYear: data.vehicle.productionYear || '',
-        color: data.vehicle.color || '',
-        plateNumber: data.vehicle.plateNumber || '',
-        registrationCertificate: data.vehicle.registrationCertificate || '',
-        carImage: data.vehicle.carImage || '',
-        seats: data.vehicle.seats || 0,
-      };
+      if (data.vehicle.type) updateData['vehicle.type'] = data.vehicle.type;
+      if (data.vehicle.brand) updateData['vehicle.brand'] = data.vehicle.brand;
+      if (data.vehicle.model) updateData['vehicle.model'] = data.vehicle.model;
+      if (data.vehicle.productionYear) updateData['vehicle.productionYear'] = data.vehicle.productionYear;
+      if (data.vehicle.color) updateData['vehicle.color'] = data.vehicle.color;
+      if (data.vehicle.plateNumber) updateData['vehicle.plateNumber'] = data.vehicle.plateNumber;
+      if (data.vehicle.registrationCertificate) updateData['vehicle.registrationCertificate'] = data.vehicle.registrationCertificate;
+      if (data.vehicle.carImage) updateData['vehicle.carImage'] = data.vehicle.carImage;
+      if (data.vehicle.seats !== undefined) updateData['vehicle.seats'] = data.vehicle.seats;
+      if (data.vehicle.vehicleLicense) updateData['vehicle.vehicleLicense'] = data.vehicle.vehicleLicense;
     }
 
     if (data.operation) {
-      updateData.operation = {
-        place: data.operation.place || '',
-        available: data.operation.available || false,
-      };
+      if (data.operation.place) updateData.place = data.operation.place;
     }
 
     if (data.role) {
